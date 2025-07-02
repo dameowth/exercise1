@@ -4,7 +4,7 @@ import { Pool } from 'pg';
 dotenv.config();
 
 const pool = new Pool({
-  connectionString: "postgresql://iot4_user:aJ0WNKvQIlYN9ftysmQ1Y1SJsb4iMwIt@dpg-d0vknr8gjchc7388rh2g-a.oregon-postgres.render.com/iot4",
+  connectionString: "postgresql://iot4_iym0_user:2QaZucv26ADb9cL6hAFVdf1msSloHIS8@dpg-d1i9fver433s73a7a0mg-a.oregon-postgres.render.com/iot4_iym0",
   ssl: { rejectUnauthorized: true }
 });
 
