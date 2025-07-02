@@ -8,16 +8,16 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: true }
 });
 
-export default pool;
-
-/*async function testConection() {
+async function testConnection() {
   try {
     const client = await pool.connect();
-    console.log("Connection Successful");
+    console.log("✅ Conexión exitosa a la base de datos");
     client.release();
-    await pool.end();
   } catch (err) {
-    console.err("Error to connect", err);
+    console.error("❌ Error al conectar a la base de datos:", err.message);
+    process.exit(1);
   }
 }
-testConection();*/
+testConnection();
+
+export default pool;
