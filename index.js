@@ -25,7 +25,7 @@ app.post("/create-data-table", async (req, res) => {
         CREATE TABLE data (
           id SERIAL PRIMARY KEY,
           name VARCHAR(100) NOT NULL,
-          enrollId VARCHAR(20) NOT NULL UNIQUE,
+          enrollId VARCHAR(20) NOT NULL,
           value TIMESTAMP NOT NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
