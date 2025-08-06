@@ -8,7 +8,7 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors({ origin: ['https://exercise1-g67a.onrender.com', 'http://localhost:3000'] }));
+app.use(cors({ origin: ['https://exercise1-nt4i.onrender.com', 'http://localhost:3000'] }));
 app.use(express.json());
 
 app.post("/create-data-table", async (req, res) => {
@@ -40,7 +40,7 @@ app.post("/create-data-table", async (req, res) => {
   }
 });
 
-app.post("/savedata", async (req, res) => {
+app.post("/save-data", async (req, res) => {
   const { name, enrollId, value } = req.body;
 
   if (!name || !enrollId || !value) {
@@ -112,6 +112,17 @@ app.post("/drop-data-table", async (req, res) => {
   } catch (error) {
     console.error("❌ Error:", error.message);
     return res.status(500).json({ error: "Error al eliminar la tabla" });
+  }
+});
+
+app.get("/getdata", async (req, res) => {
+  const tableName = "data";
+  try {
+    const result = await pool.query(`SELECT * FROM ${tableName}`);
+    return res.status(200).json({ message: "✅ Datos obtenidos exitosamente", data: result.rows });
+  } catch (error) {
+    console.error("❌ Error:", error.message);
+    return res.status(500).json({ error: "Error al obtener los datos" });
   }
 });
 
