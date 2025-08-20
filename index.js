@@ -8,7 +8,14 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors({ origin: ['https://exercise1-nt4i.onrender.com', 'http://localhost:3000'] }));
+app.use(cors({
+  origin: [
+    'https://exercise1-nt4i.onrender.com',
+    'http://localhost:3000',
+    'http://localhost:5173', // Vite dev server
+    'https://frontend-p5su.onrender.com' // Render static site
+  ]
+}));
 app.use(express.json());
 
 app.post("/create-data-table", async (req, res) => {
