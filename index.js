@@ -25,8 +25,9 @@ app.post("/create-data-table", async (req, res) => {
         CREATE TABLE data (
           id SERIAL PRIMARY KEY,
           name VARCHAR(100) NOT NULL,
-          enrollId VARCHAR(20) NOT NULL,
+          enrollId VARCHAR(20) NOT NULL UNIQUE,
           value TIMESTAMP NOT NULL,
+          device_status BOOLEAN DEFAULT FALSE,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
@@ -61,47 +62,20 @@ app.post("/save-data", async (req, res) => {
 
   try {
     const result = await pool.query(
-      `INSERT INTO data (name, enrollId, value) VALUES ($1, $2, $3) RETURNING *`,
+      `INSERT INTO data (name, enrollId, value, device_status) 
+       VALUES ($1, $2, $3, FALSE) 
+       ON CONFLICT (enrollId) DO UPDATE SET name = EXCLUDED.name, value = EXCLUDED.value 
+       RETURNING *`,
       [name, enrollId, value]
     );
 
     return res.status(201).json({
-      message: "✅ Datos guardados exitosamente",
+      message: "✅ Datos guardados/actualizados exitosamente",
       data: result.rows[0],
     });
   } catch (error) {
-    if (error.code === '23505') {
-      return res.status(409).json({ error: "Matrícula ya existe" });
-    }
     console.error("❌ Error:", error.message);
     return res.status(500).json({ error: "Error al guardar los datos" });
-  }
-});
-
-app.post("/alter-data-table", async (req, res) => {
-  try {
-    const tableName = "data";
-
-    const checkTable = await pool.query(
-      `SELECT to_regclass($1)::text AS exists`,
-      [`public.${tableName}`]
-    );
-
-    if (!checkTable.rows[0].exists) {
-      return res.status(404).json({ error: "La tabla no existe" });
-    }
-
-    await pool.query(`
-      ALTER TABLE data
-      ADD COLUMN IF NOT EXISTS name VARCHAR(100) NOT NULL,
-      ADD COLUMN IF NOT EXISTS enrollId VARCHAR(20) NOT NULL UNIQUE,
-      ADD COLUMN IF NOT EXISTS value TIMESTAMP NOT NULL
-    `);
-
-    return res.status(200).json({ message: "✅ Tabla modificada exitosamente" });
-  } catch (error) {
-    console.error("❌ Error:", error.message);
-    return res.status(500).json({ error: "Error al modificar la tabla" });
   }
 });
 
@@ -126,8 +100,82 @@ app.get("/getdata", async (req, res) => {
   }
 });
 
-app.get("/temperatura", (req, res) => {
-  res.json({ valor: "10 °C", timestamp: new Date().toISOString() });
+// Endpoints para device
+app.post("/device/turn-on", async (req, res) => {
+  const { enrollId } = req.body;
+
+  if (!enrollId) {
+    return res.status(400).json({ error: "El campo 'enrollId' es requerido" });
+  }
+
+  try {
+    const result = await pool.query(
+      `UPDATE data SET device_status = TRUE WHERE enrollId = $1 RETURNING *`,
+      [enrollId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Dispositivo no encontrado" });
+    }
+
+    return res.status(200).json({
+      message: "✅ Dispositivo encendido exitosamente",
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error("❌ Error:", error.message);
+    return res.status(500).json({ error: "Error al encender el dispositivo" });
+  }
+});
+
+app.post("/device/turn-off", async (req, res) => {
+  const { enrollId } = req.body;
+
+  if (!enrollId) {
+    return res.status(400).json({ error: "El campo 'enrollId' es requerido" });
+  }
+
+  try {
+    const result = await pool.query(
+      `UPDATE data SET device_status = FALSE WHERE enrollId = $1 RETURNING *`,
+      [enrollId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Dispositivo no encontrado" });
+    }
+
+    return res.status(200).json({
+      message: "✅ Dispositivo apagado exitosamente",
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error("❌ Error:", error.message);
+    return res.status(500).json({ error: "Error al apagar el dispositivo" });
+  }
+});
+
+app.get("/device/status/:enrollId", async (req, res) => {
+  const { enrollId } = req.params;
+
+  try {
+    const result = await pool.query(
+      `SELECT device_status FROM data WHERE enrollId = $1`,
+      [enrollId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Dispositivo no encontrado" });
+    }
+
+    return res.status(200).json({
+      message: "✅ Estado del dispositivo obtenido exitosamente",
+      device_status: result.rows[0].device_status
+    });
+  } catch (error) {
+    console.error("❌ Error:", error.message);
+    return res.status(500).json({ error: "Error al obtener el estado del dispositivo" });
+  }
 });
 
 app.listen(PORT, () => {
