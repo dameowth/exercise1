@@ -31,7 +31,7 @@ app.post("/create-data-table", async (req, res) => {
       await pool.query(`
         CREATE TABLE data (
           id SERIAL PRIMARY KEY,
-          name VARCHAR(100) NOT NULL,
+          deviceName VARCHAR(100) NOT NULL,
           enrollId VARCHAR(20) NOT NULL UNIQUE,
           value TIMESTAMP NOT NULL,
           device_status BOOLEAN DEFAULT FALSE,
