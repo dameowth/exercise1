@@ -59,7 +59,7 @@ app.post("/create-data-table", async (req, res) => {
 
     return res.status(201).json({ message: "✅ Tablas creadas exitosamente o ya existen" });
   } catch (error) {
-    console.error("❌ Error:", error.message);
+    console.error("❌ Error in /create-data-table:", error.message, error.stack);
     return res.status(500).json({ error: "Error al procesar la solicitud" });
   }
 });
@@ -68,6 +68,7 @@ app.post("/save-data", async (req, res) => {
   const { deviceName, enrollId, value } = req.body;
 
   if (!deviceName || !enrollId || !value) {
+    console.error("❌ Missing fields in /save-data:", { deviceName, enrollId, value });
     return res.status(400).json({ error: "Los campos 'deviceName', 'enrollId' y 'value' son requeridos" });
   }
 
@@ -97,7 +98,7 @@ app.post("/save-data", async (req, res) => {
       data: result.rows[0],
     });
   } catch (error) {
-    console.error("❌ Error:", error.message);
+    console.error("❌ Error in /save-data:", error.message, error.stack);
     return res.status(500).json({ error: "Error al guardar los datos" });
   }
 });
@@ -108,7 +109,7 @@ app.post("/drop-data-table", async (req, res) => {
     await pool.query(`DROP TABLE IF EXISTS data`);
     return res.status(200).json({ message: "✅ Tablas eliminadas exitosamente" });
   } catch (error) {
-    console.error("❌ Error:", error.message);
+    console.error("❌ Error in /drop-data-table:", error.message, error.stack);
     return res.status(500).json({ error: "Error al eliminar las tablas" });
   }
 });
@@ -119,7 +120,7 @@ app.get("/getdata", async (req, res) => {
     const result = await pool.query(`SELECT * FROM ${tableName}`);
     return res.status(200).json({ message: "✅ Datos obtenidos exitosamente", data: result.rows });
   } catch (error) {
-    console.error("❌ Error:", error.message);
+    console.error("❌ Error in /getdata:", error.message, error.stack);
     return res.status(500).json({ error: "Error al obtener los datos" });
   }
 });
@@ -128,6 +129,7 @@ app.post("/device/turn-on", async (req, res) => {
   const { enrollId } = req.body;
 
   if (!enrollId) {
+    console.error("❌ Missing enrollId in /device/turn-on:", req.body);
     return res.status(400).json({ error: "El campo 'enrollId' es requerido" });
   }
 
@@ -138,6 +140,7 @@ app.post("/device/turn-on", async (req, res) => {
     );
 
     if (result.rowCount === 0) {
+      console.error("❌ Device not found for enrollId:", enrollId);
       return res.status(404).json({ error: "Dispositivo no encontrado" });
     }
 
@@ -151,7 +154,7 @@ app.post("/device/turn-on", async (req, res) => {
       data: result.rows[0]
     });
   } catch (error) {
-    console.error("❌ Error:", error.message);
+    console.error("❌ Error in /device/turn-on:", error.message, error.stack);
     return res.status(500).json({ error: "Error al encender el dispositivo" });
   }
 });
@@ -160,6 +163,7 @@ app.post("/device/turn-off", async (req, res) => {
   const { enrollId } = req.body;
 
   if (!enrollId) {
+    console.error("❌ Missing enrollId in /device/turn-off:", req.body);
     return res.status(400).json({ error: "El campo 'enrollId' es requerido" });
   }
 
@@ -170,6 +174,7 @@ app.post("/device/turn-off", async (req, res) => {
     );
 
     if (result.rowCount === 0) {
+      console.error("❌ Device not found for enrollId:", enrollId);
       return res.status(404).json({ error: "Dispositivo no encontrado" });
     }
 
@@ -183,7 +188,7 @@ app.post("/device/turn-off", async (req, res) => {
       data: result.rows[0]
     });
   } catch (error) {
-    console.error("❌ Error:", error.message);
+    console.error("❌ Error in /device/turn-off:", error.message, error.stack);
     return res.status(500).json({ error: "Error al apagar el dispositivo" });
   }
 });
@@ -198,6 +203,7 @@ app.get("/device/status/:enrollId", async (req, res) => {
     );
 
     if (result.rowCount === 0) {
+      console.error("❌ Device not found for enrollId:", enrollId);
       return res.status(404).json({ error: "Dispositivo no encontrado" });
     }
 
@@ -206,7 +212,7 @@ app.get("/device/status/:enrollId", async (req, res) => {
       device_status: result.rows[0].device_status
     });
   } catch (error) {
-    console.error("❌ Error:", error.message);
+    console.error("❌ Error in /device/status:", error.message, error.stack);
     return res.status(500).json({ error: "Error al obtener el estado del dispositivo" });
   }
 });
@@ -225,7 +231,7 @@ app.get("/device/logs/:enrollId", async (req, res) => {
       logs: result.rows
     });
   } catch (error) {
-    console.error("❌ Error:", error.message);
+    console.error("❌ Error in /device/logs:", error.message, error.stack);
     return res.status(500).json({ error: "Error al obtener los logs" });
   }
 });
@@ -235,5 +241,5 @@ app.listen(PORT, () => {
 });
 
 process.on("unhandledRejection", (error) => {
-  console.error("❌ Unhandled Rejection:", error.message);
+  console.error("❌ Unhandled Rejection:", error.message, error.stack);
 });
