@@ -1,12 +1,9 @@
-import dotenv from 'dotenv';
 import pool from "./db.js";
 import express from "express";
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
-
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -135,16 +132,13 @@ app.post("/save-data", verifyToken, async (req, res) => {
 
   try {
     const result = await pool.query(
-      `INSERT INTO data (deviceName, enrollId, value, device_status) 
-       VALUES ($1, $2, $3, FALSE) 
-       ON CONFLICT (enrollId) DO UPDATE SET deviceName = EXCLUDED.deviceName, value = EXCLUDED.value 
-       RETURNING *`,
+      `INSERT INTO data (deviceName, enrollId, value) VALUES ($1, $2, $3) RETURNING *`,
       [deviceName.trim(), enrollId.trim(), value]
     );
 
     await pool.query(
       `INSERT INTO device_logs (enrollId, action, user_id) VALUES ($1, $2, $3)`,
-      [enrollId.trim(), 'save-data', req.user?.id || null]
+      [enrollId.trim(), 'REGISTER', req.user.id]
     );
 
     return res.status(201).json({
@@ -161,71 +155,10 @@ app.post("/save-data", verifyToken, async (req, res) => {
   }
 });
 
-app.post("/drop-data-table", verifyToken, async (req, res) => {
-  try {
-    await pool.query(`DROP TABLE IF EXISTS device_logs`);
-    await pool.query(`DROP TABLE IF EXISTS data`);
-    return res.status(200).json({ message: "✅ Tablas eliminadas exitosamente" });
-  } catch (error) {
-    console.error("❌ Error in /drop-data-table:", {
-      message: error.message,
-      stack: error.stack
-    });
-    return res.status(500).json({ error: "Error al eliminar las tablas" });
-  }
-});
-
-app.get("/getdata", async (req, res) => {
-  try {
-    const result = await pool.query(`SELECT * FROM data`);
-    return res.status(200).json({ message: "✅ Devices fetched successfully", data: result.rows });
-  } catch (error) {
-    console.error("❌ Error in /getdata:", { message: error.message, stack: error.stack });
-    return res.status(500).json({ error: "Error fetching devices" });
-  }
-});
-
-app.post("/device/register", async (req, res) => {
-  const { enrollId, deviceName } = req.body;
-  if (!enrollId?.trim() || !deviceName?.trim()) {
-    return res.status(400).json({ error: "enrollId and deviceName are required" });
-  }
-  try {
-    const token = jwt.sign({ enrollId, deviceName }, JWT_SECRET, { expiresIn: '30d' });
-    return res.status(200).json({ message: "Device registered", token });
-  } catch (error) {
-    console.error("❌ Error in /device/register:", { message: error.message });
-    return res.status(500).json({ error: "Error registering device" });
-  }
-});
-
-app.get("/device/:enrollId", async (req, res) => {
-  const { enrollId } = req.params;
-  try {
-    const result = await pool.query(
-      `SELECT device_status, value, deviceName FROM data WHERE enrollId = $1`,
-      [enrollId]
-    );
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: "Dispositivo no encontrado" });
-    }
-    return res.status(200).json({
-      message: "✅ Device data fetched successfully",
-      device_status: result.rows[0].device_status,
-      value: result.rows[0].value,
-      deviceName: result.rows[0].deviceName
-    });
-  } catch (error) {
-    console.error("❌ Error in /device/:enrollId:", { message: error.message, stack: error.stack });
-    return res.status(500).json({ error: "Error fetching device data" });
-  }
-});
-
 app.post("/device/turn-on", verifyToken, async (req, res) => {
   const { enrollId } = req.body;
 
   if (!enrollId?.trim()) {
-    console.error("❌ Missing enrollId in /device/turn-on:", req.body);
     return res.status(400).json({ error: "El campo 'enrollId' es requerido" });
   }
 
@@ -236,13 +169,12 @@ app.post("/device/turn-on", verifyToken, async (req, res) => {
     );
 
     if (result.rowCount === 0) {
-      console.error("❌ Device not found for enrollId:", enrollId);
       return res.status(404).json({ error: "Dispositivo no encontrado" });
     }
 
     await pool.query(
       `INSERT INTO device_logs (enrollId, action, user_id) VALUES ($1, $2, $3)`,
-      [enrollId.trim(), 'on', req.user.id]
+      [enrollId.trim(), 'TURN_ON', req.user.id]
     );
 
     return res.status(200).json({
@@ -263,7 +195,6 @@ app.post("/device/turn-off", verifyToken, async (req, res) => {
   const { enrollId } = req.body;
 
   if (!enrollId?.trim()) {
-    console.error("❌ Missing enrollId in /device/turn-off:", req.body);
     return res.status(400).json({ error: "El campo 'enrollId' es requerido" });
   }
 
@@ -274,13 +205,12 @@ app.post("/device/turn-off", verifyToken, async (req, res) => {
     );
 
     if (result.rowCount === 0) {
-      console.error("❌ Device not found for enrollId:", enrollId);
       return res.status(404).json({ error: "Dispositivo no encontrado" });
     }
 
     await pool.query(
       `INSERT INTO device_logs (enrollId, action, user_id) VALUES ($1, $2, $3)`,
-      [enrollId.trim(), 'off', req.user.id]
+      [enrollId.trim(), 'TURN_OFF', req.user.id]
     );
 
     return res.status(200).json({
