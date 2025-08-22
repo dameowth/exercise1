@@ -8,6 +8,8 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: true }
 });
 
+const JWT_SECRET = process.env.JWT_SECRET || '123456789abcdef';
+
 async function testConnection() {
   try {
     const client = await pool.connect();

@@ -1,12 +1,15 @@
 import pool from "./db.js";
 import express from "express";
 import cors from "cors";
-import dotenv from 'dotenv';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET;
 
 app.use(cors({
   origin: [
@@ -16,6 +19,7 @@ app.use(cors({
     'https://frontend-p5su.onrender.com'
   ]
 }));
+
 app.use(express.json());
 
 app.post("/create-data-table", async (req, res) => {
@@ -52,31 +56,58 @@ app.post("/create-data-table", async (req, res) => {
           id SERIAL PRIMARY KEY,
           enrollId VARCHAR(20) NOT NULL,
           action VARCHAR(10) NOT NULL,
-          timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          user_id INTEGER REFERENCES users(id),
+          FOREIGN KEY (enrollId) REFERENCES data(enrollId) ON DELETE CASCADE
         )
       `);
     }
 
+    const checkUsersTable = await pool.query(
+      `SELECT to_regclass($1)::text AS exists`,
+      [`public.users`]
+    );
+
+    if (!checkUsersTable.rows[0].exists) {
+      await pool.query(`
+        CREATE TABLE users (
+          id SERIAL PRIMARY KEY,
+          username VARCHAR(50) UNIQUE NOT NULL,
+          email VARCHAR(100) UNIQUE NOT NULL,
+          password VARCHAR(255) NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+    }
+
+    await pool.query(`
+      ALTER TABLE device_logs
+      ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id)
+    `);
+
     return res.status(201).json({ message: "✅ Tablas creadas exitosamente o ya existen" });
   } catch (error) {
-    console.error("❌ Error in /create-data-table:", error.message, error.stack);
+    console.error("❌ Error in /create-data-table:", {
+      message: error.message,
+      stack: error.stack
+    });
     return res.status(500).json({ error: "Error al procesar la solicitud" });
   }
 });
 
-app.post("/save-data", async (req, res) => {
+app.post("/save-data", verifyToken, async (req, res) => {
   const { deviceName, enrollId, value } = req.body;
 
-  if (!deviceName || !enrollId || !value) {
+  if (!deviceName?.trim() || !enrollId?.trim() || !value?.trim()) {
     console.error("❌ Missing fields in /save-data:", { deviceName, enrollId, value });
     return res.status(400).json({ error: "Los campos 'deviceName', 'enrollId' y 'value' son requeridos" });
   }
 
-  if (deviceName.length > 100 || !/^[A-Za-z\s]+$/.test(deviceName)) {
+  if (deviceName.trim().length > 100 || !/^[A-Za-z\s]{1,100}$/.test(deviceName.trim())) {
     return res.status(400).json({ error: "Nombre inválido" });
   }
 
-  if (enrollId.length > 20 || !/^[A-Za-z0-9]+$/.test(enrollId)) {
+  if (enrollId.trim().length > 20 || !/^[A-Za-z0-9]{1,20}$/.test(enrollId.trim())) {
     return res.status(400).json({ error: "Matrícula inválida" });
   }
 
@@ -90,7 +121,7 @@ app.post("/save-data", async (req, res) => {
        VALUES ($1, $2, $3, FALSE) 
        ON CONFLICT (enrollId) DO UPDATE SET deviceName = EXCLUDED.deviceName, value = EXCLUDED.value 
        RETURNING *`,
-      [deviceName, enrollId, value]
+      [deviceName.trim(), enrollId.trim(), value]
     );
 
     return res.status(201).json({
@@ -98,18 +129,25 @@ app.post("/save-data", async (req, res) => {
       data: result.rows[0],
     });
   } catch (error) {
-    console.error("❌ Error in /save-data:", error.message, error.stack);
+    console.error("❌ Error in /save-data:", {
+      message: error.message,
+      stack: error.stack,
+      requestBody: req.body
+    });
     return res.status(500).json({ error: "Error al guardar los datos" });
   }
 });
 
-app.post("/drop-data-table", async (req, res) => {
+app.post("/drop-data-table", verifyToken, async (req, res) => {
   try {
     await pool.query(`DROP TABLE IF EXISTS device_logs`);
     await pool.query(`DROP TABLE IF EXISTS data`);
     return res.status(200).json({ message: "✅ Tablas eliminadas exitosamente" });
   } catch (error) {
-    console.error("❌ Error in /drop-data-table:", error.message, error.stack);
+    console.error("❌ Error in /drop-data-table:", {
+      message: error.message,
+      stack: error.stack
+    });
     return res.status(500).json({ error: "Error al eliminar las tablas" });
   }
 });
@@ -120,15 +158,18 @@ app.get("/getdata", async (req, res) => {
     const result = await pool.query(`SELECT * FROM ${tableName}`);
     return res.status(200).json({ message: "✅ Datos obtenidos exitosamente", data: result.rows });
   } catch (error) {
-    console.error("❌ Error in /getdata:", error.message, error.stack);
+    console.error("❌ Error in /getdata:", {
+      message: error.message,
+      stack: error.stack
+    });
     return res.status(500).json({ error: "Error al obtener los datos" });
   }
 });
 
-app.post("/device/turn-on", async (req, res) => {
+app.post("/device/turn-on", verifyToken, async (req, res) => {
   const { enrollId } = req.body;
 
-  if (!enrollId) {
+  if (!enrollId?.trim()) {
     console.error("❌ Missing enrollId in /device/turn-on:", req.body);
     return res.status(400).json({ error: "El campo 'enrollId' es requerido" });
   }
@@ -136,7 +177,7 @@ app.post("/device/turn-on", async (req, res) => {
   try {
     const result = await pool.query(
       `UPDATE data SET device_status = TRUE WHERE enrollId = $1 RETURNING *`,
-      [enrollId]
+      [enrollId.trim()]
     );
 
     if (result.rowCount === 0) {
@@ -145,8 +186,8 @@ app.post("/device/turn-on", async (req, res) => {
     }
 
     await pool.query(
-      `INSERT INTO device_logs (enrollId, action) VALUES ($1, $2)`,
-      [enrollId, 'on']
+      `INSERT INTO device_logs (enrollId, action, user_id) VALUES ($1, $2, $3)`,
+      [enrollId.trim(), 'on', req.user.id]
     );
 
     return res.status(200).json({
@@ -154,15 +195,19 @@ app.post("/device/turn-on", async (req, res) => {
       data: result.rows[0]
     });
   } catch (error) {
-    console.error("❌ Error in /device/turn-on:", error.message, error.stack);
+    console.error("❌ Error in /device/turn-on:", {
+      message: error.message,
+      stack: error.stack,
+      requestBody: req.body
+    });
     return res.status(500).json({ error: "Error al encender el dispositivo" });
   }
 });
 
-app.post("/device/turn-off", async (req, res) => {
+app.post("/device/turn-off", verifyToken, async (req, res) => {
   const { enrollId } = req.body;
 
-  if (!enrollId) {
+  if (!enrollId?.trim()) {
     console.error("❌ Missing enrollId in /device/turn-off:", req.body);
     return res.status(400).json({ error: "El campo 'enrollId' es requerido" });
   }
@@ -170,7 +215,7 @@ app.post("/device/turn-off", async (req, res) => {
   try {
     const result = await pool.query(
       `UPDATE data SET device_status = FALSE WHERE enrollId = $1 RETURNING *`,
-      [enrollId]
+      [enrollId.trim()]
     );
 
     if (result.rowCount === 0) {
@@ -179,8 +224,8 @@ app.post("/device/turn-off", async (req, res) => {
     }
 
     await pool.query(
-      `INSERT INTO device_logs (enrollId, action) VALUES ($1, $2)`,
-      [enrollId, 'off']
+      `INSERT INTO device_logs (enrollId, action, user_id) VALUES ($1, $2, $3)`,
+      [enrollId.trim(), 'off', req.user.id]
     );
 
     return res.status(200).json({
@@ -188,7 +233,11 @@ app.post("/device/turn-off", async (req, res) => {
       data: result.rows[0]
     });
   } catch (error) {
-    console.error("❌ Error in /device/turn-off:", error.message, error.stack);
+    console.error("❌ Error in /device/turn-off:", {
+      message: error.message,
+      stack: error.stack,
+      requestBody: req.body
+    });
     return res.status(500).json({ error: "Error al apagar el dispositivo" });
   }
 });
@@ -212,27 +261,88 @@ app.get("/device/status/:enrollId", async (req, res) => {
       device_status: result.rows[0].device_status
     });
   } catch (error) {
-    console.error("❌ Error in /device/status:", error.message, error.stack);
+    console.error("❌ Error in /device/status:", {
+      message: error.message,
+      stack: error.stack,
+      enrollId
+    });
     return res.status(500).json({ error: "Error al obtener el estado del dispositivo" });
   }
 });
 
 app.get("/device/logs/:enrollId", async (req, res) => {
   const { enrollId } = req.params;
-
   try {
     const result = await pool.query(
-      `SELECT action, timestamp FROM device_logs WHERE enrollId = $1 ORDER BY timestamp DESC`,
+      `SELECT l.action, l.timestamp, u.username 
+       FROM device_logs l 
+       LEFT JOIN users u ON l.user_id = u.id 
+       WHERE l.enrollId = $1 ORDER BY l.timestamp DESC`,
       [enrollId]
     );
-
     return res.status(200).json({
       message: "✅ Logs obtenidos exitosamente",
       logs: result.rows
     });
   } catch (error) {
-    console.error("❌ Error in /device/logs:", error.message, error.stack);
+    console.error("❌ Error in /device/logs:", {
+      message: error.message,
+      stack: error.stack,
+      enrollId
+    });
     return res.status(500).json({ error: "Error al obtener los logs" });
+  }
+});
+
+app.post("/user/signup", async (req, res) => {
+  const { username, email, password } = req.body;
+  if (!username?.trim() || !email?.trim() || !password?.trim()) {
+    return res.status(400).json({ error: "Username, email, and password are required" });
+  }
+  try {
+    const hashedPassword = await bcrypt.hash(password.trim(), 10);
+    const result = await pool.query(
+      `INSERT INTO users (username, email, password) VALUES ($1, $2, $3) RETURNING id, username, email`,
+      [username.trim(), email.trim(), hashedPassword]
+    );
+    return res.status(201).json({ message: "User registered", user: result.rows[0] });
+  } catch (error) {
+    if (error.code === '23505') {
+      return res.status(409).json({ error: "Username or email already exists" });
+    }
+    console.error("❌ Error in /user/signup:", {
+      message: error.message,
+      stack: error.stack,
+      requestBody: req.body
+    });
+    return res.status(500).json({ error: "Error registering user" });
+  }
+});
+
+app.post("/user/login", async (req, res) => {
+  const { email, password } = req.body;
+  if (!email?.trim() || !password?.trim()) {
+    return res.status(400).json({ error: "Email and password are required" });
+  }
+  try {
+    const result = await pool.query(`SELECT * FROM users WHERE email = $1`, [email.trim()]);
+    if (result.rowCount === 0) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+    const user = result.rows[0];
+    const isMatch = await bcrypt.compare(password.trim(), user.password);
+    if (!isMatch) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+    const token = jwt.sign({ id: user.id, username: user.username, email: user.email }, JWT_SECRET, { expiresIn: '1h' });
+    return res.status(200).json({ message: "Login successful", token });
+  } catch (error) {
+    console.error("❌ Error in /user/login:", {
+      message: error.message,
+      stack: error.stack,
+      requestBody: { email }
+    });
+    return res.status(500).json({ error: "Error logging in" });
   }
 });
 
@@ -241,5 +351,8 @@ app.listen(PORT, () => {
 });
 
 process.on("unhandledRejection", (error) => {
-  console.error("❌ Unhandled Rejection:", error.message, error.stack);
+  console.error("❌ Unhandled Rejection:", {
+    message: error.message,
+    stack: error.stack
+  });
 });
