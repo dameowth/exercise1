@@ -10,7 +10,7 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'X7kP9mQ2vL5jR8tY3uW4eH6nB1cD0fG9aS3rT2wQ8vL5jX7k';
+const JWT_SECRET = process.env.JWT_SECRET;
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100
@@ -142,9 +142,14 @@ app.post("/save-data", verifyToken, async (req, res) => {
       [deviceName.trim(), enrollId.trim(), value]
     );
 
+    await pool.query(
+      `INSERT INTO device_logs (enrollId, action, user_id) VALUES ($1, $2, $3)`,
+      [enrollId.trim(), 'save-data', req.user?.id || null]
+    );
+
     return res.status(201).json({
-      message: "✅ Datos guardados/actualizados exitosamente",
-      data: result.rows[0],
+      message: "✅ Datos guardados exitosamente",
+      data: result.rows[0]
     });
   } catch (error) {
     console.error("❌ Error in /save-data:", {
@@ -171,16 +176,48 @@ app.post("/drop-data-table", verifyToken, async (req, res) => {
 });
 
 app.get("/getdata", async (req, res) => {
-  const tableName = "data";
   try {
-    const result = await pool.query(`SELECT * FROM ${tableName}`);
-    return res.status(200).json({ message: "✅ Datos obtenidos exitosamente", data: result.rows });
+    const result = await pool.query(`SELECT * FROM data`);
+    return res.status(200).json({ message: "✅ Devices fetched successfully", data: result.rows });
   } catch (error) {
-    console.error("❌ Error in /getdata:", {
-      message: error.message,
-      stack: error.stack
+    console.error("❌ Error in /getdata:", { message: error.message, stack: error.stack });
+    return res.status(500).json({ error: "Error fetching devices" });
+  }
+});
+
+app.post("/device/register", async (req, res) => {
+  const { enrollId, deviceName } = req.body;
+  if (!enrollId?.trim() || !deviceName?.trim()) {
+    return res.status(400).json({ error: "enrollId and deviceName are required" });
+  }
+  try {
+    const token = jwt.sign({ enrollId, deviceName }, JWT_SECRET, { expiresIn: '30d' });
+    return res.status(200).json({ message: "Device registered", token });
+  } catch (error) {
+    console.error("❌ Error in /device/register:", { message: error.message });
+    return res.status(500).json({ error: "Error registering device" });
+  }
+});
+
+app.get("/device/:enrollId", async (req, res) => {
+  const { enrollId } = req.params;
+  try {
+    const result = await pool.query(
+      `SELECT device_status, value, deviceName FROM data WHERE enrollId = $1`,
+      [enrollId]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Dispositivo no encontrado" });
+    }
+    return res.status(200).json({
+      message: "✅ Device data fetched successfully",
+      device_status: result.rows[0].device_status,
+      value: result.rows[0].value,
+      deviceName: result.rows[0].deviceName
     });
-    return res.status(500).json({ error: "Error al obtener los datos" });
+  } catch (error) {
+    console.error("❌ Error in /device/:enrollId:", { message: error.message, stack: error.stack });
+    return res.status(500).json({ error: "Error fetching device data" });
   }
 });
 
