@@ -48,11 +48,26 @@ app.post("/create-data-table", async (req, res) => {
     const dataTableName = "data";
     const logsTableName = "device_logs";
 
+    const checkUsersTable = await pool.query(
+      `SELECT to_regclass($1)::text AS exists`,
+      [`public.users`]
+    );
+    if (!checkUsersTable.rows[0].exists) {
+      await pool.query(`
+        CREATE TABLE users (
+          id SERIAL PRIMARY KEY,
+          username VARCHAR(50) UNIQUE NOT NULL,
+          email VARCHAR(100) UNIQUE NOT NULL,
+          password VARCHAR(255) NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+    }
+
     const checkDataTable = await pool.query(
       `SELECT to_regclass($1)::text AS exists`,
       [`public.${dataTableName}`]
     );
-
     if (!checkDataTable.rows[0].exists) {
       await pool.query(`
         CREATE TABLE data (
@@ -70,7 +85,6 @@ app.post("/create-data-table", async (req, res) => {
       `SELECT to_regclass($1)::text AS exists`,
       [`public.${logsTableName}`]
     );
-
     if (!checkLogsTable.rows[0].exists) {
       await pool.query(`
         CREATE TABLE device_logs (
@@ -80,23 +94,6 @@ app.post("/create-data-table", async (req, res) => {
           timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           user_id INTEGER REFERENCES users(id),
           FOREIGN KEY (enrollId) REFERENCES data(enrollId) ON DELETE CASCADE
-        )
-      `);
-    }
-
-    const checkUsersTable = await pool.query(
-      `SELECT to_regclass($1)::text AS exists`,
-      [`public.users`]
-    );
-
-    if (!checkUsersTable.rows[0].exists) {
-      await pool.query(`
-        CREATE TABLE users (
-          id SERIAL PRIMARY KEY,
-          username VARCHAR(50) UNIQUE NOT NULL,
-          email VARCHAR(100) UNIQUE NOT NULL,
-          password VARCHAR(255) NOT NULL,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
     }
