@@ -10,7 +10,7 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_SECRET = process.env.JWT_SECRET || 'X7kP9mQ2vL5jR8tY3uW4eH6nB1cD0fG9aS3rT2wQ8vL5jX7k';
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100
