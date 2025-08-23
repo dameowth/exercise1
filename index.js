@@ -179,7 +179,7 @@ app.post("/save-data", verifyToken, async (req, res) => {
   }
 });
 
-app.post("/user/signup", verifyToken, async (req, res) => {
+app.post("/user/signup", async (req, res) => {
   const { username, email, password } = req.body;
   if (!username?.trim() || !email?.trim() || !password?.trim()) {
     return res.status(400).json({ error: "Username, email, and password are required" });
@@ -204,7 +204,7 @@ app.post("/user/signup", verifyToken, async (req, res) => {
   }
 });
 
-app.post("/user/login", verifyToken, async (req, res) => {
+app.post("/user/login", async (req, res) => {
   const { email, password } = req.body;
   if (!email?.trim() || !password?.trim()) {
     return res.status(400).json({ error: "Email and password are required" });
