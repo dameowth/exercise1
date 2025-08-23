@@ -1,4 +1,4 @@
-import pool from "./db.js";
+import { pool, testConnection } from "./db.js";
 import express from "express";
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
@@ -23,6 +23,8 @@ app.use(cors({
 }));
 
 app.use(limiter);
+app.use(express.json());
+
 const verifyToken = (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -38,9 +40,7 @@ const verifyToken = (req, res, next) => {
   }
 };
 
-app.use(express.json());
-
-app.post("/create-data-table", async (req, res) => {
+async function initializeTables() {
   try {
     const dataTableName = "data";
     const logsTableName = "device_logs";
@@ -59,6 +59,7 @@ app.post("/create-data-table", async (req, res) => {
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
+      console.log("✅ Tabla 'users' creada");
     }
 
     const checkDataTable = await pool.query(
@@ -76,6 +77,7 @@ app.post("/create-data-table", async (req, res) => {
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
+      console.log("✅ Tabla 'data' creada");
     }
 
     const checkLogsTable = await pool.query(
@@ -93,22 +95,27 @@ app.post("/create-data-table", async (req, res) => {
           FOREIGN KEY (enrollId) REFERENCES data(enrollId) ON DELETE CASCADE
         )
       `);
+      console.log("✅ Tabla 'device_logs' creada");
     }
 
     await pool.query(`
       ALTER TABLE device_logs
       ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id)
     `);
-
-    return res.status(201).json({ message: "✅ Tablas creadas exitosamente o ya existen" });
+    console.log("✅ Tablas inicializadas exitosamente");
   } catch (error) {
-    console.error("❌ Error in /create-data-table:", {
-      message: error.message,
-      stack: error.stack
-    });
-    return res.status(500).json({ error: "Error al procesar la solicitud" });
+    console.error("❌ Error inicializando tablas:", error.message);
+    throw error;
   }
-});
+}
+
+async function startServer() {
+  const connected = await testConnection();
+  if (!connected) {
+    console.error("❌ No se puede iniciar server sin conexión a DB");
+    process.exit(1);
+  }
+  await initializeTables();
 
 app.post("/delete-data-table", verifyToken, async (req, res) => {
   try {
@@ -169,6 +176,58 @@ app.post("/save-data", verifyToken, async (req, res) => {
       requestBody: req.body
     });
     return res.status(500).json({ error: "Error al guardar los datos" });
+  }
+});
+
+app.post("/user/signup", verifyToken, async (req, res) => {
+  const { username, email, password } = req.body;
+  if (!username?.trim() || !email?.trim() || !password?.trim()) {
+    return res.status(400).json({ error: "Username, email, and password are required" });
+  }
+  try {
+    const hashedPassword = await bcrypt.hash(password.trim(), 10);
+    const result = await pool.query(
+      `INSERT INTO users (username, email, password) VALUES ($1, $2, $3) RETURNING id, username, email`,
+      [username.trim(), email.trim(), hashedPassword]
+    );
+    return res.status(201).json({ message: "User registered", user: result.rows[0] });
+  } catch (error) {
+    if (error.code === '23505') {
+      return res.status(409).json({ error: "Username or email already exists" });
+    }
+    console.error("❌ Error in /user/signup:", {
+      message: error.message,
+      stack: error.stack,
+      requestBody: req.body
+    });
+    return res.status(500).json({ error: "Error registering user" });
+  }
+});
+
+app.post("/user/login", verifyToken, async (req, res) => {
+  const { email, password } = req.body;
+  if (!email?.trim() || !password?.trim()) {
+    return res.status(400).json({ error: "Email and password are required" });
+  }
+  try {
+    const result = await pool.query(`SELECT * FROM users WHERE email = $1`, [email.trim()]);
+    if (result.rowCount === 0) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+    const user = result.rows[0];
+    const isMatch = await bcrypt.compare(password.trim(), user.password);
+    if (!isMatch) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+    const token = jwt.sign({ id: user.id, username: user.username, email: user.email }, JWT_SECRET, { expiresIn: '1h' });
+    return res.status(200).json({ message: "Login successful", token });
+  } catch (error) {
+    console.error("❌ Error in /user/login:", {
+      message: error.message,
+      stack: error.stack,
+      requestBody: { email }
+    });
+    return res.status(500).json({ error: "Error logging in" });
   }
 });
 
@@ -244,7 +303,7 @@ app.post("/device/turn-off", verifyToken, async (req, res) => {
   }
 });
 
-app.get("/device/status/:enrollId", async (req, res) => {
+app.get("/device/status/:enrollId", verifyToken, async (req, res) => {
   const { enrollId } = req.params;
 
   try {
@@ -272,7 +331,7 @@ app.get("/device/status/:enrollId", async (req, res) => {
   }
 });
 
-app.get("/device/logs/:enrollId", async (req, res) => {
+app.get("/device/logs/:enrollId", verifyToken, async (req, res) => {
   const { enrollId } = req.params;
   try {
     const result = await pool.query(
@@ -296,65 +355,16 @@ app.get("/device/logs/:enrollId", async (req, res) => {
   }
 });
 
-app.post("/user/signup", async (req, res) => {
-  const { username, email, password } = req.body;
-  if (!username?.trim() || !email?.trim() || !password?.trim()) {
-    return res.status(400).json({ error: "Username, email, and password are required" });
-  }
-  try {
-    const hashedPassword = await bcrypt.hash(password.trim(), 10);
-    const result = await pool.query(
-      `INSERT INTO users (username, email, password) VALUES ($1, $2, $3) RETURNING id, username, email`,
-      [username.trim(), email.trim(), hashedPassword]
-    );
-    return res.status(201).json({ message: "User registered", user: result.rows[0] });
-  } catch (error) {
-    if (error.code === '23505') {
-      return res.status(409).json({ error: "Username or email already exists" });
-    }
-    console.error("❌ Error in /user/signup:", {
-      message: error.message,
-      stack: error.stack,
-      requestBody: req.body
-    });
-    return res.status(500).json({ error: "Error registering user" });
-  }
-});
+  app.listen(PORT, () => {
+    console.log(`✅ Servidor corriendo en puerto ${PORT}`);
+  });
+}
 
-app.post("/user/login", async (req, res) => {
-  const { email, password } = req.body;
-  if (!email?.trim() || !password?.trim()) {
-    return res.status(400).json({ error: "Email and password are required" });
-  }
-  try {
-    const result = await pool.query(`SELECT * FROM users WHERE email = $1`, [email.trim()]);
-    if (result.rowCount === 0) {
-      return res.status(401).json({ error: "Invalid credentials" });
-    }
-    const user = result.rows[0];
-    const isMatch = await bcrypt.compare(password.trim(), user.password);
-    if (!isMatch) {
-      return res.status(401).json({ error: "Invalid credentials" });
-    }
-    const token = jwt.sign({ id: user.id, username: user.username, email: user.email }, JWT_SECRET, { expiresIn: '1h' });
-    return res.status(200).json({ message: "Login successful", token });
-  } catch (error) {
-    console.error("❌ Error in /user/login:", {
-      message: error.message,
-      stack: error.stack,
-      requestBody: { email }
-    });
-    return res.status(500).json({ error: "Error logging in" });
-  }
-});
-
-app.listen(PORT, () => {
-  console.log(`✅ Servidor corriendo en puerto ${PORT}`);
+startServer().catch(err => {
+  console.error("❌ Error iniciando server:", err);
+  process.exit(1);
 });
 
 process.on("unhandledRejection", (error) => {
-  console.error("❌ Unhandled Rejection:", {
-    message: error.message,
-    stack: error.stack
-  });
+  console.error("❌ Unhandled Rejection:", error.message);
 });

@@ -10,10 +10,11 @@ async function testConnection() {
     const client = await pool.connect();
     console.log("✅ Conexión exitosa a la base de datos");
     client.release();
+    return true;
   } catch (err) {
     console.error("❌ Error al conectar a la base de datos:", err.message);
+    return false;
   }
 }
-testConnection();
 
-export default pool;
+export { pool, testConnection };
