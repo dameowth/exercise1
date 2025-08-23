@@ -110,6 +110,23 @@ app.post("/create-data-table", async (req, res) => {
   }
 });
 
+app.post("/delete-data-table", verifyToken, async (req, res) => {
+  try {
+    // Drop tables in reverse order to handle foreign key dependencies
+    await pool.query(`DROP TABLE IF EXISTS device_logs`);
+    await pool.query(`DROP TABLE IF EXISTS data`);
+    await pool.query(`DROP TABLE IF EXISTS users`);
+
+    return res.status(200).json({ message: "✅ Tablas eliminadas exitosamente" });
+  } catch (error) {
+    console.error("❌ Error in /delete-data-table:", {
+      message: error.message,
+      stack: error.stack
+    });
+    return res.status(500).json({ error: "Error al eliminar las tablas" });
+  }
+});
+
 app.post("/save-data", verifyToken, async (req, res) => {
   const { deviceName, enrollId, value } = req.body;
 
