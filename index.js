@@ -179,6 +179,28 @@ app.post("/save-data", verifyToken, async (req, res) => {
   }
 });
 
+app.get("/get-data", verifyToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT d.*, u.username AS registered_by 
+       FROM data d 
+       LEFT JOIN device_logs l ON d.enrollId = l.enrollId AND l.action = 'REGISTER'
+       LEFT JOIN users u ON l.user_id = u.id
+       ORDER BY d.created_at DESC`
+    );
+    return res.status(200).json({
+      message: "✅ Datos obtenidos exitosamente",
+      data: result.rows
+    });
+  } catch (error) {
+    console.error("❌ Error in /get-data:", {
+      message: error.message,
+      stack: error.stack
+    });
+    return res.status(500).json({ error: "Error al obtener los datos" });
+  }
+});
+
 app.post("/user/signup", async (req, res) => {
   const { username, email, password } = req.body;
   if (!username?.trim() || !email?.trim() || !password?.trim()) {
