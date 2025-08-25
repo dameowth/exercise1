@@ -8,6 +8,7 @@ import rateLimit from 'express-rate-limit';
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET;
+const ADMIN_SECRET = process.env.ADMIN_SECRET;
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100
@@ -116,6 +117,31 @@ async function startServer() {
     process.exit(1);
   }
   await initializeTables();
+
+app.post("/reset-tables", verifyToken, async (req, res) => {
+  const { adminSecret } = req.body;
+  if (!adminSecret || adminSecret !== ADMIN_SECRET) {
+    console.error("❌ Admin secret inválido en /reset-tables");
+    return res.status(403).json({ error: "Admin secret inválido" });
+  }
+
+  try {
+    await pool.query(`DROP TABLE IF EXISTS device_logs`);
+    await pool.query(`DROP TABLE IF EXISTS data`);
+    await pool.query(`DROP TABLE IF EXISTS users`);
+    console.log("✅ Tablas dropeadas exitosamente");
+
+    await initializeTables();
+
+    return res.status(200).json({ message: "✅ Tablas reseteadas exitosamente" });
+  } catch (error) {
+    console.error("❌ Error en /reset-tables:", {
+      message: error.message,
+      stack: error.stack
+    });
+    return res.status(500).json({ error: "Error al resetear las tablas" });
+  }
+});
 
 app.post("/delete-data-table", verifyToken, async (req, res) => {
   try {
