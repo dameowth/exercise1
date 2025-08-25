@@ -85,82 +85,81 @@ async function startServer() {
   await initializeTables();
 
   // User Signup
-  app.post("/user/signup", async (req, res) => {
-    const { username, email, password } = req.body;
-    if (!username?.trim() || !email?.trim() || !password?.trim()) {
-      return res.status(400).json({ error: "All fields required" });
+app.post("/user/signup", async (req, res) => {
+  const { username, email, password } = req.body;
+  if (!username?.trim() || !email?.trim() || !password?.trim()) {
+    return res.status(400).json({ error: "All fields required" });
+  }
+  try {
+    const check = await pool.query(`SELECT 1 FROM users WHERE email = $1 OR username = $2`, [email.trim(), username.trim()]);
+    if (check.rowCount > 0) {
+      return res.status(409).json({ error: "User or email exists" });
     }
-    try {
-      const check = await pool.query(`SELECT 1 FROM users WHERE email = $1 OR username = $2`, [email.trim(), username.trim()]);
-      if (check.rowCount > 0) {
-        return res.status(409).json({ error: "User or email exists" });
-      }
-      const hashed = await bcrypt.hash(password.trim(), 10);
-      await pool.query(`INSERT INTO users (username, email, password) VALUES ($1, $2, $3)`, [username.trim(), email.trim(), hashed]);
-      res.status(201).json({ message: "✅ User registered" });
-    } catch (error) {
-      console.error("❌ Error in /user/signup:", error.message);
-      res.status(500).json({ error: "Error registering user" });
-    }
-  });
+    const hashed = await bcrypt.hash(password.trim(), 10);
+    await pool.query(`INSERT INTO users (username, email, password) VALUES ($1, $2, $3)`, [username.trim(), email.trim(), hashed]);
+    res.status(201).json({ message: "✅ User registered" });
+  } catch (error) {
+    console.error("❌ Error in /user/signup:", error.message);
+    res.status(500).json({ error: "Error registering user" });
+  }
+});
 
-  // User Login (from provided)
-  app.post("/user/login", async (req, res) => {
-    const { email, password } = req.body;
-    if (!email?.trim() || !password?.trim()) {
-      return res.status(400).json({ error: "All fields required" });
+// User Login (from provided)
+app.post("/user/login", async (req, res) => {
+  const { email, password } = req.body;
+  if (!email?.trim() || !password?.trim()) {
+    return res.status(400).json({ error: "Email and password are required" });
+  }
+  try {
+    const result = await pool.query(`SELECT * FROM users WHERE email = $1`, [email.trim()]);
+    if (result.rowCount === 0) return res.status(401).json({ error: "Invalid email or password" });
+    const user = result.rows[0];
+    if (!await bcrypt.compare(password.trim(), user.password)) {
+      return res.status(401).json({ error: "Invalid email or password" });
     }
-    try {
-      const result = await pool.query(`SELECT * FROM users WHERE email = $1`, [email.trim()]);
-      if (result.rowCount === 0) return res.status(401).json({ error: "Invalid credentials" });
-      const user = result.rows[0];
-      if (!await bcrypt.compare(password.trim(), user.password)) return res.status(401).json({ error: "Invalid credentials" });
-      const token = jwt.sign({ id: user.id, username: user.username, email: user.email }, JWT_SECRET, { expiresIn: '1h' });
-      res.status(200).json({ message: "Login successful", token });
-    } catch (error) {
-      console.error("❌ Error in /user/login:", error.message);  // Sanitized: no req.body
-      res.status(500).json({ error: "Error logging in" });
-    }
-  });
+    const token = jwt.sign({ id: user.id, username: user.username, email: user.email }, JWT_SECRET, { expiresIn: '1h' });
+    res.status(200).json({ message: "Login successful", token });
+  } catch (error) {
+    console.error("❌ Error in /user/login:", error.message);
+    res.status(500).json({ error: "Error during login process" });
+  }
+});
 
-  // Save Data (Device Register)
-  app.post("/save-data", async (req, res) => {
-    const { deviceName, enrollId, value } = req.body;  // Destructure first
-    if (!deviceName?.trim() || !enrollId?.trim() || !value?.trim()) {
-      return res.status(400).json({ error: "All fields required" });
-    }
-    if (!/^[A-Za-z\s]{1,100}$/.test(deviceName.trim())) {
-      return res.status(400).json({ error: "Invalid device name" });
-    }
-    if (!/^[A-Za-z0-9]{1,20}$/.test(enrollId.trim())) {
-      return res.status(400).json({ error: "Invalid enrollId" });
-    }
-    if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value.trim())) {
-      return res.status(400).json({ error: "Invalid timestamp format" });
-    }
-    if (!req.user?.id) {
-      return res.status(401).json({ error: "User not authenticated" });
-    }
-    try {
-      const check = await pool.query(`SELECT 1 FROM data WHERE enrollId = $1`, [enrollId.trim()]);
-      if (check.rowCount > 0) return res.status(409).json({ error: "EnrollId exists" });
-      const result = await pool.query(
-        `INSERT INTO data (deviceName, enrollId, value) VALUES ($1, $2, $3) RETURNING *`,
-        [deviceName.trim(), enrollId.trim(), value.trim()]
-      );
-      await pool.query(
-        `INSERT INTO device_logs (enrollId, action, user_id) VALUES ($1, $2, $3)`,
-        [enrollId.trim(), 'REGISTER', req.user.id]
-      );
-      res.status(201).json({ message: "✅ Data saved", data: result.rows[0] });
-    } catch (error) {
-      console.error("❌ Error in /save-data:", error.message);
-      res.status(500).json({ error: "Error saving data" });
-    }
-  });
+// Save Data (Device Register)
+app.post("/save-data", verifyToken, async (req, res) => {
+  const { deviceName, enrollId, value } = req.body;
+  if (!deviceName?.trim() || !enrollId?.trim() || !value?.trim()) {
+    return res.status(400).json({ error: "All fields (deviceName, enrollId, value) are required" });
+  }
+  if (!/^[A-Za-z\s]{1,100}$/.test(deviceName.trim())) {
+    return res.status(400).json({ error: "Invalid device name (letters and spaces only, max 100 chars)" });
+  }
+  if (!/^[A-Za-z0-9]{1,20}$/.test(enrollId.trim())) {
+    return res.status(400).json({ error: "Invalid enrollId (alphanumeric, max 20 chars)" });
+  }
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value.trim())) {
+    return res.status(400).json({ error: "Invalid timestamp format (YYYY-MM-DD HH:mm:ss)" });
+  }
+  try {
+    const check = await pool.query(`SELECT 1 FROM data WHERE enrollId = $1`, [enrollId.trim()]);
+    if (check.rowCount > 0) return res.status(409).json({ error: "EnrollId already exists" });
+    const result = await pool.query(
+      `INSERT INTO data (deviceName, enrollId, value) VALUES ($1, $2, $3) RETURNING *`,
+      [deviceName.trim(), enrollId.trim(), value.trim()]
+    );
+    await pool.query(
+      `INSERT INTO device_logs (enrollId, action, user_id) VALUES ($1, $2, $3)`,
+      [enrollId.trim(), 'REGISTER', req.user.id]
+    );
+    res.status(201).json({ message: "✅ Data saved successfully", data: result.rows[0] });
+  } catch (error) {
+    console.error("❌ Error in /save-data:", error.message);
+    res.status(500).json({ error: "Error saving data to database" });
+  }
+});
 
-  // Get Data
-  app.get("/get-data", verifyToken, async (req, res) => {
+// Get Data
+app.get("/get-data", verifyToken, async (req, res) => {
   try {
     const result = await pool.query(`SELECT * FROM data ORDER BY created_at DESC`);
     res.status(200).json(result.rows);
@@ -170,92 +169,91 @@ async function startServer() {
   }
 });
 
-  // Turn On
-  app.post("/device/turn-on", async (req, res) => {
-    const { enrollId } = req.body;
-    if (!enrollId?.trim()) return res.status(400).json({ error: "enrollId required" });
-    try {
-      const result = await pool.query(`UPDATE data SET device_status = TRUE WHERE enrollId = $1 RETURNING *`, [enrollId.trim()]);
-      if (result.rowCount === 0) return res.status(404).json({ error: "Device not found" });
-      await pool.query(`INSERT INTO device_logs (enrollId, action, user_id) VALUES ($1, $2, $3)`, [enrollId.trim(), 'TURN_ON', req.user.id]);
-      res.status(200).json({ message: "✅ Device turned on", data: result.rows[0] });
-    } catch (error) {
-      console.error("❌ Error in /device/turn-on:", error.message);
-      res.status(500).json({ error: "Error turning on device" });
-    }
-  });
+app.post("/device/turn-on", verifyToken, async (req, res) => {
+  const { enrollId } = req.body;
+  if (!enrollId?.trim()) return res.status(400).json({ error: "enrollId is required" });
+  try {
+    const result = await pool.query(`UPDATE data SET device_status = TRUE WHERE enrollId = $1 RETURNING *`, [enrollId.trim()]);
+    if (result.rowCount === 0) return res.status(404).json({ error: "Device not found" });
+    await pool.query(`INSERT INTO device_logs (enrollId, action, user_id) VALUES ($1, $2, $3)`, [enrollId.trim(), 'TURN_ON', req.user.id]);
+    res.status(200).json({ message: "✅ Device turned on", data: result.rows[0] });
+  } catch (error) {
+    console.error("❌ Error in /device/turn-on:", error.message);
+    res.status(500).json({ error: "Error turning on device" });
+  }
+});
 
-  app.post("/device/turn-off", async (req, res) => {
-    const { enrollId } = req.body;
-    if (!enrollId?.trim()) return res.status(400).json({ error: "enrollId required" });
-    try {
-      const result = await pool.query(`UPDATE data SET device_status = FALSE WHERE enrollId = $1 RETURNING *`, [enrollId.trim()]);
-      if (result.rowCount === 0) return res.status(404).json({ error: "Device not found" });
-      await pool.query(`INSERT INTO device_logs (enrollId, action, user_id) VALUES ($1, $2, $3)`, [enrollId.trim(), 'TURN_OFF', req.user.id]);
-      res.status(200).json({ message: "✅ Device turned off", data: result.rows[0] });
-    } catch (error) {
-      console.error("❌ Error in /device/turn-off:", error.message);
-      res.status(500).json({ error: "Error turning off device" });
-    }
-  });
+app.post("/device/turn-off", verifyToken, async (req, res) => {
+  const { enrollId } = req.body;
+  if (!enrollId?.trim()) return res.status(400).json({ error: "enrollId is required" });
+  try {
+    const result = await pool.query(`UPDATE data SET device_status = FALSE WHERE enrollId = $1 RETURNING *`, [enrollId.trim()]);
+    if (result.rowCount === 0) return res.status(404).json({ error: "Device not found" });
+    await pool.query(`INSERT INTO device_logs (enrollId, action, user_id) VALUES ($1, $2, $3)`, [enrollId.trim(), 'TURN_OFF', req.user.id]);
+    res.status(200).json({ message: "✅ Device turned off", data: result.rows[0] });
+  } catch (error) {
+    console.error("❌ Error in /device/turn-off:", error.message);
+    res.status(500).json({ error: "Error turning off device" });
+  }
+});
 
-  // Status
-  app.get("/device/status/:enrollId", async (req, res) => {
-    const { enrollId } = req.params;
-    try {
-      const result = await pool.query(`SELECT device_status FROM data WHERE enrollId = $1`, [enrollId]);
-      if (result.rowCount === 0) return res.status(404).json({ error: "Device not found" });
-      res.status(200).json({ message: "✅ Status fetched", device_status: result.rows[0].device_status });
-    } catch (error) {
-      console.error("❌ Error in /device/status:", error.message);
-      res.status(500).json({ error: "Error fetching status" });
-    }
-  });
+// Status
+app.get("/device/status/:enrollId", async (req, res) => {
+  const { enrollId } = req.params;
+  try {
+    const result = await pool.query(`SELECT device_status FROM data WHERE enrollId = $1`, [enrollId]);
+    if (result.rowCount === 0) return res.status(404).json({ error: "Device not found" });
+    res.status(200).json({ message: "✅ Status fetched", device_status: result.rows[0].device_status });
+  } catch (error) {
+    console.error("❌ Error in /device/status:", error.message);
+    res.status(500).json({ error: "Error fetching status" });
+  }
+});
 
-  // Logs
-  app.get("/device/logs/:enrollId", async (req, res) => {
-    const { enrollId } = req.params;
-    try {
-      const result = await pool.query(
-        `SELECT l.action, l.timestamp, u.username FROM device_logs l LEFT JOIN users u ON l.user_id = u.id WHERE l.enrollId = $1 ORDER BY l.timestamp DESC`,
-        [enrollId]
-      );
-      res.status(200).json({ message: "✅ Logs fetched", logs: result.rows });
-    } catch (error) {
-      console.error("❌ Error in /device/logs:", error.message);
-      res.status(500).json({ error: "Error fetching logs" });
-    }
-  });
+// Logs
+app.get("/device/logs/:enrollId", async (req, res) => {
+  const { enrollId } = req.params;
+  try {
+    const result = await pool.query(
+      `SELECT l.action, l.timestamp, u.username FROM device_logs l LEFT JOIN users u ON l.user_id = u.id WHERE l.enrollId = $1 ORDER BY l.timestamp DESC`,
+      [enrollId]
+    );
+    res.status(200).json({ message: "✅ Logs fetched", logs: result.rows });
+  } catch (error) {
+    console.error("❌ Error in /device/logs:", error.message);
+    res.status(500).json({ error: "Error fetching logs" });
+  }
+});
 
-  // Reset Tables
-  app.post("/reset-tables", verifyToken, async (req, res) => {
-    const { adminSecret } = req.body;
-    if (adminSecret !== ADMIN_SECRET) return res.status(403).json({ error: "Invalid admin secret" });
-    try {
-      await pool.query(`DROP TABLE IF EXISTS device_logs, data, users`);
-      await initializeTables();
-      res.status(200).json({ message: "✅ Tables reset" });
-    } catch (error) {
-      console.error("❌ Error in /reset-tables:", error.message);
-      res.status(500).json({ error: "Error resetting tables" });
-    }
-  });
+// Reset Tables
+app.post("/reset-tables", verifyToken, async (req, res) => {
+  const { adminSecret } = req.body;
+  if (adminSecret !== ADMIN_SECRET) return res.status(403).json({ error: "Invalid admin secret" });
+  try {
+    await pool.query(`DROP TABLE IF EXISTS device_logs, data, users`);
+    await initializeTables();
+    res.status(200).json({ message: "✅ Tables reset" });
+  } catch (error) {
+    console.error("❌ Error in /reset-tables:", error.message);
+    res.status(500).json({ error: "Error resetting tables" });
+  }
+});
 
-  // Delete Data Table - Added adminSecret
-  app.post("/delete-data-table", verifyToken, async (req, res) => {
-    const { adminSecret } = req.body;
-    if (adminSecret !== ADMIN_SECRET) return res.status(403).json({ error: "Invalid admin secret" });
-    try {
-      await pool.query(`DROP TABLE IF EXISTS device_logs`);
-      await pool.query(`DROP TABLE IF EXISTS data`);
-      res.status(200).json({ message: "✅ Data tables deleted" });
-    } catch (error) {
-      console.error("❌ Error in /delete-data-table:", error.message);
-      res.status(500).json({ error: "Error deleting tables" });
-    }
-  });
+// Delete Data Table - Added adminSecret
+app.post("/delete-data-table", verifyToken, async (req, res) => {
+  const { adminSecret } = req.body;
+  if (adminSecret !== ADMIN_SECRET) return res.status(403).json({ error: "Invalid admin secret" });
+  try {
+    await pool.query(`DROP TABLE IF EXISTS device_logs`);
+    await pool.query(`DROP TABLE IF EXISTS data`);
+    res.status(200).json({ message: "✅ Data tables deleted" });
+  } catch (error) {
+    console.error("❌ Error in /delete-data-table:", error.message);
+    res.status(500).json({ error: "Error deleting tables" });
+  }
+});
 
-  app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
 }
 
 startServer().catch(err => {
