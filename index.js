@@ -161,7 +161,12 @@ app.post("/delete-data-table", verifyToken, async (req, res) => {
 });
 
 app.post("/save-data", verifyToken, async (req, res) => {
+  const checkEnrollId = await pool.query("SELECT 1 FROM data WHERE enrollId = $1", [enrollId.trim()]);
   const { deviceName, enrollId, value } = req.body;
+
+  if (checkEnrollId.rowCount > 0) {
+    return res.status(400).json({ error: "enrollId already exists" });
+  }
 
   if (!deviceName?.trim() || !enrollId?.trim() || !value?.trim()) {
     console.error("❌ Missing fields in /save-data:", { deviceName, enrollId, value });
@@ -174,6 +179,10 @@ app.post("/save-data", verifyToken, async (req, res) => {
 
   if (enrollId.trim().length > 20 || !/^[A-Za-z0-9]{1,20}$/.test(enrollId.trim())) {
     return res.status(400).json({ error: "Matrícula inválida" });
+  }
+
+  if (!req.user || !req.user.id) {
+  return res.status(401).json({ error: "Authentication required" });
   }
 
   if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)) {
