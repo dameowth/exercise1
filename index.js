@@ -253,7 +253,7 @@ app.post("/user/login", async (req, res) => {
   }
 });
 
-app.post("/device/turn-on", verifyToken, async (req, res) => {
+app.post("/device/turn-on", async (req, res) => {
   const { enrollId } = req.body;
 
   if (!enrollId?.trim()) {
@@ -289,7 +289,7 @@ app.post("/device/turn-on", verifyToken, async (req, res) => {
   }
 });
 
-app.post("/device/turn-off", verifyToken, async (req, res) => {
+app.post("/device/turn-off", async (req, res) => {
   const { enrollId } = req.body;
 
   if (!enrollId?.trim()) {
@@ -325,7 +325,7 @@ app.post("/device/turn-off", verifyToken, async (req, res) => {
   }
 });
 
-app.get("/device/status/:enrollId", verifyToken, async (req, res) => {
+app.get("/device/status/:enrollId", async (req, res) => {
   const { enrollId } = req.params;
 
   try {
